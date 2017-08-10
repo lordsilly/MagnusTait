@@ -92,6 +92,37 @@ long ** deepcopy(long ** input) {
 	return output;
 }
 
+//converts 2d array to 1d array
+long * twotoone(long ** input) {
+	long * output = malloc(nodes * nodes * sizeof(long));
+	int i = 0;
+	for (int j = 0; j < nodes; j++) {
+		for (int k = 0; k < nodes; k++) {
+			output[i] = input[j][k];
+			i++;
+		}
+	}
+	return output;
+}
+
+//converts 1d array to 2d array
+long ** onetotwo(long * input) {
+	long ** output = malloc(nodes * sizeof(long*));
+	output[0] = malloc(nodes * sizeof(long));
+	int i = 0;
+	int j = 0;
+	for (int k = 0; k < (nodes * nodes); k++) {
+		output[i][j] = input[k];
+		j++;
+		if (j == nodes) {
+			j = 0;
+			i++;
+			output[i] = malloc(nodes * sizeof(long*));
+		}
+	}
+	return output;
+}
+
 void dumbFW(long ** graph) {
 	for (int k = 0; k < nodes; k++) {
 		for (int i = 0; i < nodes; i++) {
@@ -112,7 +143,7 @@ void printGraph(int ** graph) {
 	}
 }
 
-#define MAX_SOURCE_SIZE 128
+#define MAX_SOURCE_SIZE (0x100000)
 
 int main(void) {
 
@@ -141,10 +172,8 @@ int main(void) {
 	cl_int ret;
 
 	long ** openclGraph = deepcopy(graph);
-	long ** openclFWGraph = malloc(nodes * sizeof(long*));
-	for (int i = 0; i < nodes; i++) {
-		graph[i] = malloc(nodes * sizeof(long));
-	}
+	long * sendGraph = twotoone(openclGraph);
+	long * retGraph = malloc(nodes * nodes * sizeof(long));
 	FILE *fp;
 	char fileName[] = "kernel.cl";
 	char *source_str;
@@ -166,16 +195,25 @@ int main(void) {
 
 	context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);															/* Create OpenCL context */
 	command_queue = clCreateCommandQueue(context, device_id, 0, &ret);															/* Create Command Queue */
-	memsend = clCreateBuffer(context, CL_MEM_READ_ONLY, 1000 * 1000 * sizeof(long), NULL, &ret);								/* Create Memory Buffers */
-	memret = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 1000 * 1000 * sizeof(long), NULL, &ret);
-	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, 1000 * 1000 * sizeof(long), openclGraph, 0, NULL, NULL);
+	memsend = clCreateBuffer(context, CL_MEM_READ_ONLY, nodes * nodes * sizeof(long), NULL, &ret);								/* Create Memory Buffers */
+	memret = clCreateBuffer(context, CL_MEM_WRITE_ONLY, nodes * nodes * sizeof(long), NULL, &ret);
+	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(long), sendGraph, 0, NULL, NULL);
 	program = clCreateProgramWithSource(context, 1, (const char **)&source_str, (const size_t *)&source_size, &ret);			/* Create Kernel Program from the source */
+	printf("%d\n", ret);
 	ret = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);																/* Build Kernel Program */
+	printf("%d\n", ret);
 	kernel = clCreateKernel(program, "floydwarshall", &ret);																	/* Create OpenCL Kernel */
-	ret = clSetKernelArg(kernel, 0, 1000 * 1000 * sizeof(long), (void *)&memsend);												/* Set OpenCL Kernel Parameters */
+	printf("%d\n", ret);
+	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memsend);															/* Set OpenCL Kernel Parameters */
+	printf("%d\n", ret);
+	ret = clSetKernelArg(kernel, 1, sizeof(int), (void *)&nodes);
+	printf("%d\n", ret);
+	ret = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&memret);
+	printf("%d\n", ret);
 	ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);																	/* Execute OpenCL Kernel */
-	ret = clEnqueueReadBuffer(command_queue, memret, CL_TRUE, 0,1000 * 1000 * sizeof(long), openclFWGraph, 0, NULL, NULL);		/* Copy results from the memory buffer */												
-	printf("%d", openclFWGraph[0][0]);
+	ret = clEnqueueReadBuffer(command_queue, memret, CL_TRUE, 0,nodes * nodes * sizeof(long), retGraph, 0, NULL, NULL);			/* Copy results from the memory buffer */	
+	long ** openclFWGraph = onetotwo(retGraph);
+	printf("%d %d\n", retGraph[0], retGraph[1]);
 
 	/* Finalization */
 	ret = clFlush(command_queue);

@@ -1,4 +1,6 @@
-__kernel void floydwarshall(__global long ** graph, __global long ** result)
+__kernel void floydwarshall(__global long * graph, __const int nodes, __global long * result)
 {
-	result[0][0] = 12345;
+	for (int i = 0; i < nodes; i++) {
+		result[i] = graph[i];
+	}
 }
