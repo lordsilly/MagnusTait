@@ -123,6 +123,7 @@ long ** onetotwo(long * input) {
 	return output;
 }
 
+//non-parallel implementation of floyd-warshall algorithm
 void dumbFW(long ** graph) {
 	for (int k = 0; k < nodes; k++) {
 		for (int i = 0; i < nodes; i++) {
@@ -133,7 +134,20 @@ void dumbFW(long ** graph) {
 	}
 }
 
-void printGraph(int ** graph) {
+//returns number of differences between two graphs
+int compare(long ** a, long ** b) {
+	int count = 0;
+	for (int i = 0; i < nodes; i++) {
+		for (int j = 0; j < nodes; j++) {
+			if (a[i][j] != b[i][j]) {
+				count++;
+			}
+		}
+	}
+	return count;
+}
+
+void printGraph(long ** graph) {
 	for (int i = 0; i < nodes; i++) {
 		printf("%d : ", i);
 		for (int j = 0; j < nodes; j++) {
@@ -158,6 +172,9 @@ int main(void) {
 	graph = populate(input);
 	fclose(input);
 
+	long ** FWGraph = deepcopy(graph);
+	dumbFW(FWGraph);
+
 	//setup opencl
 	cl_device_id device_id = NULL;
 	cl_context context = NULL;
@@ -170,7 +187,11 @@ int main(void) {
 	cl_uint ret_num_devices;
 	cl_uint ret_num_platforms;
 	cl_int ret;
+	size_t global[1];
+	size_t local[1];
 
+	global[0] = 1024;
+	local[0] = 32;
 	long ** openclGraph = deepcopy(graph);
 	long * sendGraph = twotoone(openclGraph);
 	long * retGraph = malloc(nodes * nodes * sizeof(long));
@@ -190,30 +211,44 @@ int main(void) {
 	fclose(fp);
 
 	/* Get Platform and Device Info */
+	printf("\nError Codes:\n\n");
 	ret = clGetPlatformIDs(1, &platform_id, &ret_num_platforms);
 	ret = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &device_id, &ret_num_devices);
 
 	context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);															/* Create OpenCL context */
 	command_queue = clCreateCommandQueue(context, device_id, 0, &ret);															/* Create Command Queue */
-	memsend = clCreateBuffer(context, CL_MEM_READ_ONLY, nodes * nodes * sizeof(long), NULL, &ret);								/* Create Memory Buffers */
-	memret = clCreateBuffer(context, CL_MEM_WRITE_ONLY, nodes * nodes * sizeof(long), NULL, &ret);
-	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(long), sendGraph, 0, NULL, NULL);
+	memsend = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(long), NULL, &ret);								/* Create Memory Buffers */
+	memret = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(long), NULL, &ret);
+
+	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(long), sendGraph, 0, NULL, NULL);		// enqueue write buffer
+	printf("Write Buffer: %d\n", ret);
+
 	program = clCreateProgramWithSource(context, 1, (const char **)&source_str, (const size_t *)&source_size, &ret);			/* Create Kernel Program from the source */
-	printf("%d\n", ret);
+	printf("Create Program: %d\n", ret);
 	ret = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);																/* Build Kernel Program */
-	printf("%d\n", ret);
+	printf("Build Program: %d\n", ret);
 	kernel = clCreateKernel(program, "floydwarshall", &ret);																	/* Create OpenCL Kernel */
-	printf("%d\n", ret);
+	printf("Create Kernal: %d\n", ret);
+
 	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memsend);															/* Set OpenCL Kernel Parameters */
-	printf("%d\n", ret);
+	printf("Arg 0: %d\n", ret);
 	ret = clSetKernelArg(kernel, 1, sizeof(int), (void *)&nodes);
-	printf("%d\n", ret);
+	printf("Arg 1: %d\n", ret);
 	ret = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&memret);
-	printf("%d\n", ret);
+	printf("Arg 2: %d\n", ret);
+
+	//ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global, local, 0, NULL, NULL);
+	printf("ND Range: %d\n", ret);
+
 	ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);																	/* Execute OpenCL Kernel */
-	ret = clEnqueueReadBuffer(command_queue, memret, CL_TRUE, 0,nodes * nodes * sizeof(long), retGraph, 0, NULL, NULL);			/* Copy results from the memory buffer */	
+
+	ret = clEnqueueReadBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(long), retGraph, 0, NULL, NULL);		/* Copy results from the memory buffer */	
+	printf("\nResults:\n\n");
+	printf("First element of returned array %d\n", retGraph[0]);
+	printf("Second element of returned array %d\n", retGraph[1]);
+
 	long ** openclFWGraph = onetotwo(retGraph);
-	printf("%d %d\n", retGraph[0], retGraph[1]);
+	int differences = compare(openclFWGraph, graph);
 
 	/* Finalization */
 	ret = clFlush(command_queue);
