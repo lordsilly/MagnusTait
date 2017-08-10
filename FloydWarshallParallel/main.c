@@ -13,7 +13,7 @@
 
 int nodes = 0;
 
-long ** populate(FILE * input) {
+int ** populate(FILE * input) {
 	//populates graph array from file
 
 	char * line = malloc(30);
@@ -21,9 +21,9 @@ long ** populate(FILE * input) {
 	nodes = atoi(line);
 
 	//initialize output graph
-	long ** graph = malloc(nodes * sizeof(long*));
+	int ** graph = malloc(nodes * sizeof(int*));
 	for (int i = 0; i < nodes; i++) {
-		graph[i] = malloc(nodes * sizeof(long));
+		graph[i] = malloc(nodes * sizeof(int));
 		for (int j = 0; j < nodes; j++) {
 			if (i == j)graph[i][j] = 0;				//zero distance to same node
 			else graph[i][j] = 999999;				//int max distance to unconnected node
@@ -81,8 +81,8 @@ long ** populate(FILE * input) {
 }
 
 //copies a 2d array
-long ** deepcopy(long ** input) {
-	long ** output = malloc(nodes * sizeof(int*));
+int ** deepcopy(int ** input) {
+	int ** output = malloc(nodes * sizeof(int*));
 	for (int i = 0; i < nodes; i++) {
 		output[i] = malloc(nodes * sizeof(int));
 		for (int j = 0; j < nodes; j++) {
@@ -93,8 +93,8 @@ long ** deepcopy(long ** input) {
 }
 
 //converts 2d array to 1d array
-long * twotoone(long ** input) {
-	long * output = malloc(nodes * nodes * sizeof(long));
+int * twotoone(int ** input) {
+	int * output = malloc(nodes * nodes * sizeof(int));
 	int i = 0;
 	for (int j = 0; j < nodes; j++) {
 		for (int k = 0; k < nodes; k++) {
@@ -106,9 +106,9 @@ long * twotoone(long ** input) {
 }
 
 //converts 1d array to 2d array
-long ** onetotwo(long * input) {
-	long ** output = malloc(nodes * sizeof(long*));
-	output[0] = malloc(nodes * sizeof(long));
+int ** onetotwo(int * input) {
+	int ** output = malloc(nodes * sizeof(int*));
+	output[0] = malloc(nodes * sizeof(int));
 	int i = 0;
 	int j = 0;
 	for (int k = 0; k < (nodes * nodes); k++) {
@@ -117,14 +117,14 @@ long ** onetotwo(long * input) {
 		if (j == nodes) {
 			j = 0;
 			i++;
-			output[i] = malloc(nodes * sizeof(long*));
+			output[i] = malloc(nodes * sizeof(int*));
 		}
 	}
 	return output;
 }
 
 //non-parallel implementation of floyd-warshall algorithm
-void dumbFW(long ** graph) {
+void dumbFW(int ** graph) {
 	for (int k = 0; k < nodes; k++) {
 		for (int i = 0; i < nodes; i++) {
 			for (int j = 0; j < nodes; j++) {
@@ -135,7 +135,7 @@ void dumbFW(long ** graph) {
 }
 
 //returns number of differences between two graphs
-int compare(long ** a, long ** b) {
+int compare(int ** a, int ** b) {
 	int count = 0;
 	for (int i = 0; i < nodes; i++) {
 		for (int j = 0; j < nodes; j++) {
@@ -147,7 +147,7 @@ int compare(long ** a, long ** b) {
 	return count;
 }
 
-void printGraph(long ** graph) {
+void printGraph(int ** graph) {
 	for (int i = 0; i < nodes; i++) {
 		printf("%d : ", i);
 		for (int j = 0; j < nodes; j++) {
@@ -168,11 +168,11 @@ int main(void) {
 		printf("No File\n");
 		exit(EXIT_FAILURE);
 	}
-	long ** graph;
+	int ** graph;
 	graph = populate(input);
 	fclose(input);
 
-	long ** FWGraph = deepcopy(graph);
+	int ** FWGraph = deepcopy(graph);
 	dumbFW(FWGraph);
 
 	//setup opencl
@@ -187,14 +187,16 @@ int main(void) {
 	cl_uint ret_num_devices;
 	cl_uint ret_num_platforms;
 	cl_int ret;
-	size_t global[1];
-	size_t local[1];
+	size_t global[2];
+	size_t local[2];
 
 	global[0] = 1024;
+	global[1] = 1024;
 	local[0] = 32;
-	long ** openclGraph = deepcopy(graph);
-	long * sendGraph = twotoone(openclGraph);
-	long * retGraph = malloc(nodes * nodes * sizeof(long));
+	local[1] = 32;
+	int ** openclGraph = deepcopy(graph);
+	int * sendGraph = twotoone(openclGraph);
+	int * retGraph = malloc(nodes * nodes * sizeof(int));
 	FILE *fp;
 	char fileName[] = "kernel.cl";
 	char *source_str;
@@ -217,10 +219,10 @@ int main(void) {
 
 	context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);															/* Create OpenCL context */
 	command_queue = clCreateCommandQueue(context, device_id, 0, &ret);															/* Create Command Queue */
-	memsend = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(long), NULL, &ret);								/* Create Memory Buffers */
-	memret = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(long), NULL, &ret);
+	memsend = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(int), NULL, &ret);								/* Create Memory Buffers */
+	memret = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(int), NULL, &ret);
 
-	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(long), sendGraph, 0, NULL, NULL);		// enqueue write buffer
+	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(int), sendGraph, 0, NULL, NULL);		// enqueue write buffer
 	printf("Write Buffer: %d\n", ret);
 
 	program = clCreateProgramWithSource(context, 1, (const char **)&source_str, (const size_t *)&source_size, &ret);			/* Create Kernel Program from the source */
@@ -237,18 +239,16 @@ int main(void) {
 	ret = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&memret);
 	printf("Arg 2: %d\n", ret);
 
-	//ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global, local, 0, NULL, NULL);
+	ret = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global, local, 0, NULL, NULL);
 	printf("ND Range: %d\n", ret);
 
 	ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);																	/* Execute OpenCL Kernel */
 
-	ret = clEnqueueReadBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(long), retGraph, 0, NULL, NULL);		/* Copy results from the memory buffer */	
+	ret = clEnqueueReadBuffer(command_queue, memret, CL_TRUE, 0, nodes * nodes * sizeof(int), retGraph, 0, NULL, NULL);			/* Copy results from the memory buffer */
 	printf("\nResults:\n\n");
-	printf("First element of returned array %d\n", retGraph[0]);
-	printf("Second element of returned array %d\n", retGraph[1]);
-
-	long ** openclFWGraph = onetotwo(retGraph);
+	int ** openclFWGraph = onetotwo(retGraph);
 	int differences = compare(openclFWGraph, graph);
+	printf("%d\n", differences);
 
 	/* Finalization */
 	ret = clFlush(command_queue);

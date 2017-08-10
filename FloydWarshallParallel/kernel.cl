@@ -1,5 +1,9 @@
-__kernel void floydwarshall(__global long * graph, __const int nodes, __global long * result)
+__kernel void floydwarshall(__global int * graph, __const int nodes, __global int * result)
 {
-	graph[0] = 12345;
-	graph[1] = 12345;
+	int x = get_global_id(0);
+	int y = get_global_id(1);
+
+	if (x < nodes && y < nodes) {
+		result[x * nodes + y] = graph[x * nodes + y];
+	}
 }
