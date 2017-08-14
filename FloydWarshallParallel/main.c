@@ -234,7 +234,8 @@ int main(void) {
 	kernel = clCreateKernel(program, "floydwarshall", &ret);																	/* Create OpenCL Kernel */
 	printf("Create Kernal: %d\n", ret);
 
-	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memsend);															/* Set OpenCL Kernel Parameters */
+	//initial arguments, ND Range and first iteration
+	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memsend);															
 	printf("Arg 0: %d\n", ret);
 	ret = clSetKernelArg(kernel, 1, sizeof(int), (void *)&nodes);
 	printf("Arg 1: %d\n", ret);
@@ -243,11 +244,21 @@ int main(void) {
 	ret = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global, local, 0, NULL, NULL);
 	ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);
 
+	//k iterations
+	for (k = 1; k < nodes; k++) {
+		ret = clSetKernelArg(kernel, 2, sizeof(int), (void *)&k);
+		ret = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global, local, 0, NULL, NULL);
+		ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);
+	}
+
+	// get results
 	ret = clEnqueueReadBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(int), retGraph, 0, NULL, NULL);		/* Copy results from the memory buffer */
 	printf("\nResults:\n\n");
+	printf("%d %d\n", sendGraph[1], retGraph[999999]);
 	int ** openclFWGraph = onetotwo(retGraph);
 	int differences = compare(openclFWGraph, FWGraph);
-	printf("%d\n", differences);
+	printf("Number of differences: %d\n", differences);
+	if (differences == 0)printf("All shortest paths calculated correctly");
 
 	/* Finalization */
 	ret = clFlush(command_queue);
