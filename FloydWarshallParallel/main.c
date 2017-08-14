@@ -187,6 +187,7 @@ int main(void) {
 	cl_uint ret_num_devices;
 	cl_uint ret_num_platforms;
 	cl_int ret;
+
 	size_t global[2];
 	size_t local[2];
 
@@ -194,6 +195,7 @@ int main(void) {
 	global[1] = 1024;
 	local[0] = 32;
 	local[1] = 32;
+
 	int ** openclGraph = deepcopy(graph);
 	int * sendGraph = twotoone(openclGraph);
 	int * retGraph = malloc(nodes * nodes * sizeof(int));
@@ -236,18 +238,15 @@ int main(void) {
 	printf("Arg 0: %d\n", ret);
 	ret = clSetKernelArg(kernel, 1, sizeof(int), (void *)&nodes);
 	printf("Arg 1: %d\n", ret);
-	ret = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&memret);
-	printf("Arg 2: %d\n", ret);
-
+	int k = 0;
+	ret = clSetKernelArg(kernel, 2, sizeof(int), (void *)&k);
 	ret = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global, local, 0, NULL, NULL);
-	printf("ND Range: %d\n", ret);
+	ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);
 
-	ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);																	/* Execute OpenCL Kernel */
-
-	ret = clEnqueueReadBuffer(command_queue, memret, CL_TRUE, 0, nodes * nodes * sizeof(int), retGraph, 0, NULL, NULL);			/* Copy results from the memory buffer */
+	ret = clEnqueueReadBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(int), retGraph, 0, NULL, NULL);		/* Copy results from the memory buffer */
 	printf("\nResults:\n\n");
 	int ** openclFWGraph = onetotwo(retGraph);
-	int differences = compare(openclFWGraph, graph);
+	int differences = compare(openclFWGraph, FWGraph);
 	printf("%d\n", differences);
 
 	/* Finalization */
