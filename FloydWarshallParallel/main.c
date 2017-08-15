@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -13,8 +14,8 @@
 
 int nodes = 0;
 
+//populates graph 2D array from file
 int ** populate(FILE * input) {
-	//populates graph array from file
 
 	char * line = malloc(30);
 	fgets(line, 30, input);
@@ -159,22 +160,7 @@ void printGraph(int ** graph) {
 
 #define MAX_SOURCE_SIZE (0x100000)
 
-int main(void) {
-
-	//populate graph from file
-	FILE * input;
-	fopen_s(&input, inputfilename, "r");
-	if (input == NULL) {
-		printf("No File\n");
-		exit(EXIT_FAILURE);
-	}
-	int ** graph;
-	graph = populate(input);
-	fclose(input);
-
-	int ** FWGraph = deepcopy(graph);
-	dumbFW(FWGraph);
-
+int ** openclfw(int ** graph) {
 	//setup opencl
 	cl_device_id device_id = NULL;
 	cl_context context = NULL;
@@ -196,8 +182,7 @@ int main(void) {
 	local[0] = 32;
 	local[1] = 32;
 
-	int ** openclGraph = deepcopy(graph);
-	int * sendGraph = twotoone(openclGraph);
+	int * sendGraph = twotoone(graph);
 	int * retGraph = malloc(nodes * nodes * sizeof(int));
 	FILE *fp;
 	char fileName[] = "kernel.cl";
@@ -215,7 +200,6 @@ int main(void) {
 	fclose(fp);
 
 	/* Get Platform and Device Info */
-	printf("\nError Codes:\n\n");
 	ret = clGetPlatformIDs(1, &platform_id, &ret_num_platforms);
 	ret = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &device_id, &ret_num_devices);
 
@@ -225,20 +209,14 @@ int main(void) {
 	memret = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(int), NULL, &ret);
 
 	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(int), sendGraph, 0, NULL, NULL);		// enqueue write buffer
-	printf("Write Buffer: %d\n", ret);
 
 	program = clCreateProgramWithSource(context, 1, (const char **)&source_str, (const size_t *)&source_size, &ret);			/* Create Kernel Program from the source */
-	printf("Create Program: %d\n", ret);
 	ret = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);																/* Build Kernel Program */
-	printf("Build Program: %d\n", ret);
 	kernel = clCreateKernel(program, "floydwarshall", &ret);																	/* Create OpenCL Kernel */
-	printf("Create Kernal: %d\n", ret);
 
-	//initial arguments, ND Range and first iteration
-	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memsend);															
-	printf("Arg 0: %d\n", ret);
+																																//initial arguments, ND Range and first iteration
+	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memsend);
 	ret = clSetKernelArg(kernel, 1, sizeof(int), (void *)&nodes);
-	printf("Arg 1: %d\n", ret);
 	int k = 0;
 	ret = clSetKernelArg(kernel, 2, sizeof(int), (void *)&k);
 	ret = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global, local, 0, NULL, NULL);
@@ -253,12 +231,7 @@ int main(void) {
 
 	// get results
 	ret = clEnqueueReadBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(int), retGraph, 0, NULL, NULL);		/* Copy results from the memory buffer */
-	printf("\nResults:\n\n");
-	printf("%d %d\n", sendGraph[1], retGraph[999999]);
 	int ** openclFWGraph = onetotwo(retGraph);
-	int differences = compare(openclFWGraph, FWGraph);
-	printf("Number of differences: %d\n", differences);
-	if (differences == 0)printf("All shortest paths calculated correctly");
 
 	/* Finalization */
 	ret = clFlush(command_queue);
@@ -271,6 +244,40 @@ int main(void) {
 	ret = clReleaseContext(context);
 
 	free(source_str);
+
+	return openclFWGraph;
+}
+
+int main(void) {
+
+	//populate graph from file
+	FILE * input;
+	fopen_s(&input, inputfilename, "r");
+	if (input == NULL) {
+		printf("No File\n");
+		exit(EXIT_FAILURE);
+	}
+	int ** graph = populate(input);
+	fclose(input);
+
+	clock_t time;
+
+	//run sequential implementation
+	int ** FWGraph = deepcopy(graph);
+	time = clock();
+	dumbFW(FWGraph);
+	printf("Sequential Time Taken: %d\n", clock() - time);
+
+	//run opencl implementation
+	int ** openclFWGraph = deepcopy(graph);
+	time = clock();
+	openclFWGraph = openclfw(openclFWGraph);
+	printf("Sequential Time Taken: %d\n", clock() - time);
+
+	//difference check
+	int differences = compare(openclFWGraph, FWGraph);
+	printf("Number of differences: %d\n", differences);
+
 
 	return 0;
 	
