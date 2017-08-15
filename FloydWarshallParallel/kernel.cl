@@ -1,3 +1,9 @@
+/*
+Project:		FloydWarshallParallel
+Filename:		kernel.cl
+Author:			Magnus Tait
+*/
+
 __kernel void floydwarshall(__global int * graph, __const int nodes, __const int k)
 {
 	int i = get_global_id(0);
