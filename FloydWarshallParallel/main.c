@@ -1,35 +1,7 @@
-/*
-Project:		FloydWarshallParallel
-Filename:		main.c
-Author:			Magnus Tait
-
-This program is a naive OpenCL implementation of the Floyd Warshall Algorithm written in C using
-Microsoft Visual Studio 2015.
-
-The program reads an input file defining all edges of a graph and arranges it into a 2D integer
-array of all possible paths. A sequential Floyd Warshall algorithm is then performed as a baseline.
-
-An OpenCL parallel impementation is then performed. This involves converting the 2D array into a 1D
-array to be passed as an argument to the kernel. Two global work dimensions handle the two inner loops
-of the sequential Floyd Warshall Algorithm within the kernal file kernel.cl. The outer loop is handled
-by incrementing an integer argument to the kernal and enqueueing a new task within a for loop. The
-resulting 1D is then retrieved from the memory buffer, converted to a 2D array and then returned.
-
-The program then compares both arrays for mistakes. Both implementations are timed using clock();
-
-Input files consist of one line with an integer defining the total number of nodes in the graph.
-The following lines define the edges of the graph with from node, to node and weight seperated by
-space characters.
-
-This implementation is completely naive and cannot handle graphs larger than 1024 nodes. That is something
-I will work on in the future.
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
-#include <time.h>
 
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -37,17 +9,15 @@ I will work on in the future.
 #include <CL/cl.h>
 #endif
 
-//path to input file. Sample 1000 node directedgraph.txt included in git folder.
 #define inputfilename "C:/Users/lordsilly/Documents/Visual Studio 2015/Projects/FloydWarshallParallel/directedgraph.txt"
 
-int nodes = 0;				//global counter for number of nodes in graph
+int nodes = 0;
 
-//populates graph array from file
 int ** populate(FILE * input) {
+	//populates graph array from file
 
-	char * line = malloc(30);		//string for lines from file
-
-	fgets(line, 30, input);			//get first number of nodes from first line in file
+	char * line = malloc(30);
+	fgets(line, 30, input);
 	nodes = atoi(line);
 
 	//initialize output graph
@@ -60,14 +30,11 @@ int ** populate(FILE * input) {
 		}
 	}
 
-	//strings for edge data
 	char * from;
 	char * to;
 	char * weight;
-
-	int step, i, j, k;								//line string index references
-
-	while (fgets(line, 30, input) != NULL) {		//iterate over file by line
+	int step, i, j, k;
+	while (fgets(line, 30, input) != NULL) {
 		from = malloc(30);
 		to = malloc(30);
 		weight = malloc(30);
@@ -80,7 +47,6 @@ int ** populate(FILE * input) {
 		i = 0;
 		j = 0;
 		k = 0;
-		//peel edge data from line
 		for (int l = 0; l < 30; l++) {
 			if (line[l] == ' ') { 
 				step++; 
@@ -100,8 +66,6 @@ int ** populate(FILE * input) {
 				}
 			}
 		}
-
-		//cast edge data to integers and put into graph
 		int from2 = atoi(from) - 1;
 		int to2 = atoi(to) - 1;
 		int weight2 = atoi(weight);
@@ -109,8 +73,10 @@ int ** populate(FILE * input) {
 		free(from);
 		free(to);
 		free(weight);
+		from2 = 0;
+		to2 = 0;
+		weight2 = 0;
 	}
-	free(line);
 	return graph;
 }
 
@@ -193,7 +159,22 @@ void printGraph(int ** graph) {
 
 #define MAX_SOURCE_SIZE (0x100000)
 
-int ** openCLFW(int ** graph) {
+int main(void) {
+
+	//populate graph from file
+	FILE * input;
+	fopen_s(&input, inputfilename, "r");
+	if (input == NULL) {
+		printf("No File\n");
+		exit(EXIT_FAILURE);
+	}
+	int ** graph;
+	graph = populate(input);
+	fclose(input);
+
+	int ** FWGraph = deepcopy(graph);
+	dumbFW(FWGraph);
+
 	//setup opencl
 	cl_device_id device_id = NULL;
 	cl_context context = NULL;
@@ -215,14 +196,15 @@ int ** openCLFW(int ** graph) {
 	local[0] = 32;
 	local[1] = 32;
 
-	int * sendGraph = twotoone(graph);
+	int ** openclGraph = deepcopy(graph);
+	int * sendGraph = twotoone(openclGraph);
 	int * retGraph = malloc(nodes * nodes * sizeof(int));
 	FILE *fp;
 	char fileName[] = "kernel.cl";
 	char *source_str;
 	size_t source_size;
 
-	//load kernel
+	/* Load the source code containing the kernel*/
 	fopen_s(&fp, fileName, "r");
 	if (!fp) {
 		fprintf(stderr, "Failed to load kernel.\n");
@@ -232,28 +214,38 @@ int ** openCLFW(int ** graph) {
 	source_size = fread(source_str, 1, MAX_SOURCE_SIZE, fp);
 	fclose(fp);
 
-	//get platform
+	/* Get Platform and Device Info */
+	printf("\nError Codes:\n\n");
 	ret = clGetPlatformIDs(1, &platform_id, &ret_num_platforms);
 	ret = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &device_id, &ret_num_devices);
 
-	//create cl objects
-	context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
-	command_queue = clCreateCommandQueue(context, device_id, 0, &ret);
-	memsend = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(int), NULL, &ret);
+	context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);															/* Create OpenCL context */
+	command_queue = clCreateCommandQueue(context, device_id, 0, &ret);															/* Create Command Queue */
+	memsend = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(int), NULL, &ret);								/* Create Memory Buffers */
 	memret = clCreateBuffer(context, CL_MEM_READ_WRITE, nodes * nodes * sizeof(int), NULL, &ret);
 
-	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(int), sendGraph, 0, NULL, NULL);
+	ret = clEnqueueWriteBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(int), sendGraph, 0, NULL, NULL);		// enqueue write buffer
+	printf("Write Buffer: %d\n", ret);
 
-	program = clCreateProgramWithSource(context, 1, (const char **)&source_str, (const size_t *)&source_size, &ret);
-	ret = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);
-	kernel = clCreateKernel(program, "floydwarshall", &ret);
+	program = clCreateProgramWithSource(context, 1, (const char **)&source_str, (const size_t *)&source_size, &ret);			/* Create Kernel Program from the source */
+	printf("Create Program: %d\n", ret);
+	ret = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);																/* Build Kernel Program */
+	printf("Build Program: %d\n", ret);
+	kernel = clCreateKernel(program, "floydwarshall", &ret);																	/* Create OpenCL Kernel */
+	printf("Create Kernal: %d\n", ret);
 
-	//arguments
-	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memsend);
+	//initial arguments, ND Range and first iteration
+	ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memsend);															
+	printf("Arg 0: %d\n", ret);
 	ret = clSetKernelArg(kernel, 1, sizeof(int), (void *)&nodes);
+	printf("Arg 1: %d\n", ret);
+	int k = 0;
+	ret = clSetKernelArg(kernel, 2, sizeof(int), (void *)&k);
+	ret = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global, local, 0, NULL, NULL);
+	ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);
 
 	//k iterations
-	for (int k = 0; k < nodes; k++) {
+	for (k = 1; k < nodes; k++) {
 		ret = clSetKernelArg(kernel, 2, sizeof(int), (void *)&k);
 		ret = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global, local, 0, NULL, NULL);
 		ret = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);
@@ -261,7 +253,12 @@ int ** openCLFW(int ** graph) {
 
 	// get results
 	ret = clEnqueueReadBuffer(command_queue, memsend, CL_TRUE, 0, nodes * nodes * sizeof(int), retGraph, 0, NULL, NULL);		/* Copy results from the memory buffer */
+	printf("\nResults:\n\n");
+	printf("%d %d\n", sendGraph[1], retGraph[999999]);
 	int ** openclFWGraph = onetotwo(retGraph);
+	int differences = compare(openclFWGraph, FWGraph);
+	printf("Number of differences: %d\n", differences);
+	if (differences == 0)printf("All shortest paths calculated correctly");
 
 	/* Finalization */
 	ret = clFlush(command_queue);
@@ -274,39 +271,6 @@ int ** openCLFW(int ** graph) {
 	ret = clReleaseContext(context);
 
 	free(source_str);
-
-	return(openclFWGraph);
-}
-
-int main(void) {
-
-	//populate graph from file
-	FILE * input;
-	fopen_s(&input, inputfilename, "r");
-	if (input == NULL) {
-		printf("No File\n");
-		exit(EXIT_FAILURE);
-	}
-	int ** graph;
-	graph = populate(input);
-	fclose(input);
-
-	//sequential implementation
-	int ** FWGraph = deepcopy(graph);
-	printf("Sequential Implementation Started\n");
-	clock_t start = clock();
-	dumbFW(FWGraph);
-	printf("Time Taken: %d\n\n", clock() - start);
-
-	//opencl implementation
-	printf("OpenCL Implementation Started\n");
-	start = clock();
-	int ** OpenCLFWGraph = openCLFW(deepcopy(graph));
-	printf("Time Taken: %d\n\n", clock() - start);
-
-	int differences = compare(OpenCLFWGraph, FWGraph);
-	printf("Number of differences: %d\n", differences);
-	if (differences == 0)printf("All shortest paths calculated correctly\n");
 
 	return 0;
 	
